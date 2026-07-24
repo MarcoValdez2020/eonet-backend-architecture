@@ -58,3 +58,30 @@ resources:
   # - ${file(infra/cognito.yml)}
   # - ${file(infra/messaging.yml)}
   # - ${file(infra/glue.yml)}
+
+functions:
+  extract:
+    # "module" le dice al empaquetador de Python EN QUE CARPETA buscar el
+    # requirements.txt de esta funcion (y desde donde se instalan sus
+    # dependencias). Por eso "handler" ya no lleva la ruta completa desde
+    # la raiz del repo, sino relativa a ese "module".
+    module: functions/ingest/extract
+    handler: handler.handler
+    # Referenciar un Role por su Logical ID (definido en iam/roles.yml):
+    # Serverless Framework resuelve esto a un !GetAtt ExtractLambdaRole.Arn
+    # por debajo. Si NO se pusiera "role", el framework generaria uno
+    # automatico (mas generico) -- preferimos el nuestro, de minimo privilegio.
+    role: ExtractLambdaRole
+    # Default de Lambda es 6s de timeout -- insuficiente con reintentos y
+    # backoff de red. 120s da margen de sobra para una ventana chica.
+    timeout: 120
+    memorySize: 256
+    environment:
+      BUCKET_NAME: !Ref DataBucket
+    events:
+      - schedule:
+          # cron diario de ingesta incremental. Empieza DESACTIVADO
+          # (enabled: false) -- lo prendemos despues de probarlo a mano con
+          # un invoke manual, para no dejar algo sin probar corriendo solo.
+          rate: rate(1 day)
+          enabled: false

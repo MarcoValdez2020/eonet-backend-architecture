@@ -1,0 +1,4 @@
+# boto3 NO se lista aqui: el runtime de Lambda ya lo trae preinstalado
+# (es el SDK de AWS, viene con la imagen base de Python). Listarlo solo
+# agregaria peso al paquete sin necesidad.
+httpx==0.27.2
