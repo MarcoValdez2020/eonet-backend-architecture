@@ -1,0 +1,65 @@
+# SQS = cola de mensajes: un productor pone mensajes, un consumidor los
+# procesa uno a uno (o en lotes) y los borra al terminar. Aqui la usamos
+# como amortiguador entre "S3 crea un objeto" y "la Lambda curate lo
+# procesa" -- si curate esta ocupada o falla, el mensaje espera en la cola
+# en vez de perderse.
+Resources:
+  CurateDLQ:
+    Type: AWS::SQS::Queue
+    Properties:
+      # Dead Letter Queue: adonde van los mensajes que fallaron demasiadas
+      # veces (ver RedrivePolicy de CurateQueue). Retencion al maximo (14
+      # dias) para poder inspeccionar/reprocesar a mano con calma.
+      MessageRetentionPeriod: 1209600
+
+  CurateQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      # Recomendacion oficial de AWS para integraciones SQS->Lambda:
+      # VisibilityTimeout >= 6x el timeout de la funcion, para dar margen
+      # a los reintentos internos de Lambda antes de que el mensaje
+      # reaparezca en la cola y se vuelva a entregar antes de tiempo.
+      # curate tiene timeout: 300s -> 1800s.
+      VisibilityTimeout: 1800
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt CurateDLQ.Arn
+        maxReceiveCount: 3
+
+  # Sin esta politica, S3 no puede mandar mensajes a la cola: configurar la
+  # notificacion del bucket fallaria con "Unable to validate the following
+  # destination configurations" porque, por default, una cola SQS no
+  # acepta mensajes de nadie mas que su propia cuenta -- hay que autorizar
+  # explicitamente al servicio S3 (y, con la condicion, restringirlo a
+  # nuestro bucket especifico).
+  CurateQueuePolicy:
+    Type: AWS::SQS::QueuePolicy
+    Properties:
+      Queues:
+        - !Ref CurateQueue
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: s3.amazonaws.com
+            Action: sqs:SendMessage
+            Resource: !GetAtt CurateQueue.Arn
+            Condition:
+              ArnLike:
+                # OJO: NO usar !GetAtt DataBucket.Arn aqui -- crearia una
+                # dependencia circular (DataBucket ya depende de
+                # CurateQueuePolicy via DependsOn en infra/s3.yml, para
+                # forzar el orden correcto de creacion). Se reconstruye el
+                # ARN a mano con el MISMO patron de nombre que BucketName en
+                # infra/s3.yml (ambos resueltos por variables de Serverless
+                # antes de llegar a CloudFormation, sin referenciar el
+                # recurso DataBucket directamente).
+                aws:SourceArn: !Sub arn:aws:s3:::ammper-eonet-data-${sls:stage}-${aws:accountId}
+              StringEquals:
+                aws:SourceAccount: !Ref AWS::AccountId
+
+Outputs:
+  CurateQueueArn:
+    Value: !GetAtt CurateQueue.Arn
+  CurateDLQArn:
+    Value: !GetAtt CurateDLQ.Arn

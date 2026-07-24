@@ -8,6 +8,14 @@
 Resources:
   DataBucket:
     Type: AWS::S3::Bucket
+    # DependsOn explícito y OBLIGATORIO: CloudFormation no tiene ninguna otra
+    # pista (ningún !Ref/!GetAtt desde DataBucket hacia CurateQueuePolicy) de
+    # que la política de la cola debe existir ANTES de que se configure la
+    # notificación del bucket. Sin este DependsOn, el deploy puede fallar de
+    # forma intermitente con "Unable to validate the following destination
+    # configurations" porque S3 intenta validar el permiso de escritura sobre
+    # la cola antes de que la policy que se lo otorga esté aplicada.
+    DependsOn: CurateQueuePolicy
     Properties:
       BucketName: ammper-eonet-data-${sls:stage}-${aws:accountId}
       # Bloquea cualquier acceso público por default — el bucket solo debe
@@ -17,6 +25,18 @@ Resources:
         BlockPublicPolicy: true
         IgnorePublicAcls: true
         RestrictPublicBuckets: true
+      # Notifica a la cola CurateQueue (infra/messaging.yml) cuando extract
+      # escribe un objeto nuevo bajo raw/ -- así se dispara curate sin que
+      # extract tenga que saber nada de curate (desacoplados vía S3+SQS).
+      NotificationConfiguration:
+        QueueConfigurations:
+          - Event: s3:ObjectCreated:*
+            Queue: !GetAtt CurateQueue.Arn
+            Filter:
+              S3Key:
+                Rules:
+                  - Name: prefix
+                    Value: raw/
 
 # Los Outputs no son necesarios para que OTROS archivos de este mismo
 # servicio referencien el bucket (para eso basta !Ref DataBucket / !GetAtt

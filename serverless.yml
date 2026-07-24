@@ -22,6 +22,23 @@ provider:
   # — así nunca corre nada por accidente contra la cuenta de la empresa.
   # Se puede pisar puntualmente con: serverless deploy --aws-profile otro
   profile: personal
+  # Imagenes de contenedor (ECR) para funciones cuyas dependencias no caben
+  # en el limite de 250MB descomprimido de un zip/layer normal de Lambda.
+  # "curate" (polars + reverse_geocoder, que arrastra numpy/scipy) pesa
+  # 367-434MB medido localmente -- no cabe en zip. Serverless Framework crea
+  # el repositorio ECR, construye la imagen con el Dockerfile de la carpeta
+  # indicada y la sube en cada deploy.
+  ecr:
+    images:
+      curateImage:
+        path: functions/ingest/curate
+        platform: linux/arm64
+  # NOTA: cualquier comando de Serverless imprime un warning cosmetico
+  # "[!] Invalid configuration encountered / at 'functions.curate.image':
+  # unsupported string format" -- confirmado que NO bloquea nada (el
+  # deploy real funciona, la imagen se resuelve bien a un ImageUri real).
+  # Es un falso positivo del validador de config de la CLI con esta forma
+  # de referenciar provider.ecr.images por nombre. Ignorar.
 
 # "individually: true" = cada funcion se empaqueta en su propio .zip, con
 # SOLO las dependencias declaradas en el requirements.txt de su carpeta.
@@ -36,13 +53,14 @@ package:
 # para que se active, sin declarar ningun plugin).
 custom:
   pythonRequirements:
-    # No usamos dockerizePip todavia: httpx (la unica dependencia externa
-    # de `extract`) es 100% Python puro, sin extensiones compiladas en C,
-    # asi que el wheel que baja pip en tu Mac funciona igual en Lambda
-    # (Linux). Cuando lleguemos a `curate`/`forecast` (polars, numpy,
-    # scipy, pandas -- todas con codigo compilado nativo por plataforma)
-    # SI hara falta activarlo, para compilar contra Linux dentro de Docker
-    # en vez de contra macOS.
+    # Esto solo aplica a funciones de ZIP (como extract). httpx (su unica
+    # dependencia externa) es 100% Python puro, sin extensiones compiladas
+    # en C, asi que el wheel que baja pip en tu Mac funciona igual en Lambda
+    # (Linux) -- no hace falta dockerizePip para extract. `curate` NO usa
+    # este mecanismo en absoluto: sus dependencias (polars, reverse_geocoder)
+    # pesan demasiado para un zip/layer (250MB limite) y se empaquetan como
+    # imagen de contenedor (provider.ecr.images.curateImage arriba), donde
+    # el Dockerfile mismo ya construye contra Linux/arm64 directamente.
     dockerizePip: false
 
 # Cada archivo de infra/ declara un pedazo de CloudFormation (Resources: {...}).
@@ -52,11 +70,11 @@ custom:
 # deliberadamente usamos uno solo — ver plan de arquitectura).
 resources:
   - ${file(infra/s3.yml)}
+  - ${file(infra/messaging.yml)}
   - ${file(iam/roles.yml)}
   # Los iremos sumando a medida que los llenemos:
   # - ${file(infra/dynamodb.yml)}
   # - ${file(infra/cognito.yml)}
-  # - ${file(infra/messaging.yml)}
   # - ${file(infra/glue.yml)}
 
 functions:
@@ -84,3 +102,31 @@ functions:
           # invoke manual (trajo eventos reales de EONET); activado.
           rate: rate(1 day)
           enabled: true
+
+  curate:
+    # Funcion de IMAGEN (no zip): ver provider.ecr.images.curateImage arriba.
+    # "custom.pythonRequirements" (mas abajo) no aplica a esta funcion --
+    # esa config solo rige el empaquetado por zip de funciones normales.
+    image: curateImage
+    role: CurateLambdaRole
+    architecture: arm64
+    # Timeout mayor que extract: por invocacion puede traer miles de eventos
+    # de un solo objeto raw, explotarlos, geocodificar cada fila valida y
+    # escribir varias particiones Parquet.
+    timeout: 300
+    memorySize: 1024
+    environment:
+      BUCKET_NAME: !Ref DataBucket
+      OFFSHORE_THRESHOLD_KM: "100"
+    events:
+      - sqs:
+          arn: !GetAtt CurateQueue.Arn
+          # batchSize 1 a proposito: cada objeto raw ya puede traer miles de
+          # eventos por si solo (limit=10000 en extract) -- agrupar varios
+          # objetos S3 distintos en una sola invocacion solo mezclaria fallos
+          # de archivos no relacionados sin ningun beneficio real.
+          batchSize: 1
+          # Permite que, si UN mensaje del batch falla, solo ESE mensaje
+          # vuelva a la cola (para reintento/DLQ) sin reprocesar mensajes que
+          # ya se hayan escrito correctamente a curated/.
+          functionResponseType: ReportBatchItemFailures

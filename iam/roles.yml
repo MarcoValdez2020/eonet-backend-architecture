@@ -39,3 +39,37 @@ Resources:
                 # Restringido al prefijo raw/ -- ni siquiera puede tocar
                 # curated/ u otras carpetas del mismo bucket.
                 Resource: !Sub ${DataBucket.Arn}/raw/*
+
+  CurateLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: CurateReadRawWriteCuratedPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: s3:GetObject
+                Resource: !Sub ${DataBucket.Arn}/raw/*
+              - Effect: Allow
+                Action: s3:PutObject
+                Resource: !Sub ${DataBucket.Arn}/curated/*
+              # Permisos de SQS para que el Event Source Mapping pueda hacer
+              # polling de la cola y borrar mensajes procesados. Con un role
+              # PROPIO (no el generico que Serverless crearia por default),
+              # estos permisos NO se agregan solos -- hay que declararlos.
+              - Effect: Allow
+                Action:
+                  - sqs:ReceiveMessage
+                  - sqs:DeleteMessage
+                  - sqs:GetQueueAttributes
+                Resource: !GetAtt CurateQueue.Arn

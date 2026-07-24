@@ -1,0 +1,4 @@
+# boto3 no se lista: viene preinstalado en la imagen base de Lambda.
+# numpy/scipy se resuelven transitivamente via reverse_geocoder (install_requires).
+polars==1.43.0
+reverse_geocoder==1.5.1
