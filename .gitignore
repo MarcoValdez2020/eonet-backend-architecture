@@ -23,7 +23,5 @@ node_modules/
 .python-version
 .serverless/
 
-# Documento de continuidad entre sesiones de chat con Claude (no es un
-# entregable de la prueba tecnica) -- docs/decisiones.md SI se sube, ese es
-# el ADR log real.
-docs/progreso.md
+# Notas de trabajo internas, se suben manualmente despues.
+docs/
