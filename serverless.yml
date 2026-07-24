@@ -80,8 +80,7 @@ functions:
       BUCKET_NAME: !Ref DataBucket
     events:
       - schedule:
-          # cron diario de ingesta incremental. Empieza DESACTIVADO
-          # (enabled: false) -- lo prendemos despues de probarlo a mano con
-          # un invoke manual, para no dejar algo sin probar corriendo solo.
+          # cron diario de ingesta incremental. Ya se probo a mano con un
+          # invoke manual (trajo eventos reales de EONET); activado.
           rate: rate(1 day)
-          enabled: false
+          enabled: true
