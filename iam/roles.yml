@@ -1,0 +1,41 @@
+# Un Role de IAM = una identidad que algo (no una persona) puede ASUMIR
+# temporalmente para actuar en AWS. No tiene usuario/contrasena: se obtiene
+# via "sts:AssumeRole" y AWS entrega credenciales de corta duracion.
+#
+# Cada Role tiene dos partes:
+#   - AssumeRolePolicyDocument ("trust policy"): QUIEN puede asumir este rol.
+#     Aqui: solo el servicio Lambda (lambda.amazonaws.com).
+#   - Policies: QUE puede hacer una vez que lo asumio (permisos reales).
+#
+# Minimo privilegio: cada funcion tiene SU PROPIO rol, con solo lo que
+# necesita para su trabajo -- nunca un rol generico compartido con permisos
+# de mas.
+Resources:
+  ExtractLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      # Managed policy de AWS para poder escribir logs en CloudWatch
+      # (CreateLogGroup/CreateLogStream/PutLogEvents). Sin esto la Lambda
+      # corre pero no queda ningun log en CloudWatch para depurar.
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: ExtractWriteRawPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:PutObject
+                # DataBucket.Arn se resuelve porque este archivo se fusiona
+                # con infra/s3.yml en el MISMO Stack (ver serverless.yml).
+                # Restringido al prefijo raw/ -- ni siquiera puede tocar
+                # curated/ u otras carpetas del mismo bucket.
+                Resource: !Sub ${DataBucket.Arn}/raw/*

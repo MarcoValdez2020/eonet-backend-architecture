@@ -1,0 +1,29 @@
+# Ignore python cache files
+__pycache__/
+
+# Ignore pytest cache files
+.pytest_cache/
+# Ignore virtual environment folders
+venv/
+.venv/
+
+# Ignore environment variable files
+.env.*
+.env
+.env.example
+
+
+# ignore node_modules
+node_modules/
+
+# Artefactos de build de Serverless Framework (zips, plantilla CFN compilada)
+.serverless/
+
+
+.python-version
+.serverless/
+
+# Documento de continuidad entre sesiones de chat con Claude (no es un
+# entregable de la prueba tecnica) -- docs/decisiones.md SI se sube, ese es
+# el ADR log real.
+docs/progreso.md

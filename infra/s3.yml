@@ -1,0 +1,30 @@
+# Un bucket S3 = un contenedor de objetos con nombre GLOBALMENTE único en
+# TODA AWS (no solo en tu cuenta) — por eso interpolamos stage + accountId,
+# para que nadie más pueda haberlo tomado ya.
+#
+# Prefijos como "raw/", "curated/" no son carpetas reales: S3 es un almacén
+# key-value plano, y "raw/2026-07-22/events.json" es solo el nombre (key)
+# completo de un objeto. Se ve como carpetas en la consola, pero no lo son.
+Resources:
+  DataBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: ammper-eonet-data-${sls:stage}-${aws:accountId}
+      # Bloquea cualquier acceso público por default — el bucket solo debe
+      # ser accesible desde nuestras Lambdas (vía IAM), nunca desde internet.
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+
+# Los Outputs no son necesarios para que OTROS archivos de este mismo
+# servicio referencien el bucket (para eso basta !Ref DataBucket / !GetAtt
+# DataBucket.Arn en cualquier infra/*.yml, ya que todos se fusionan en un
+# solo Stack). Son solo para verlo fácilmente tras el deploy, con:
+#   serverless info
+Outputs:
+  DataBucketName:
+    Value: !Ref DataBucket
+  DataBucketArn:
+    Value: !GetAtt DataBucket.Arn

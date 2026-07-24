@@ -1,0 +1,60 @@
+# service = el nombre que agrupa TODOS los recursos de este proyecto.
+# CloudFormation crea un "Stack" (grupo de recursos que se crean/actualizan/
+# borran juntos) llamado "<service>-<stage>", ej: ammper-eonet-platform-dev.
+service: ammper-eonet-platform
+
+frameworkVersion: '4'
+
+provider:
+  name: aws
+  # Lambda no soporta python3.14 todavía (la versión que usas en local para
+  # main.py). Usamos la última que sí soporta Lambda como "managed runtime".
+  runtime: python3.13
+  region: us-east-1
+  # "stage" = ambiente (dev/prod/...). Se puede cambiar al desplegar:
+  #   serverless deploy --stage prod
+  # Mismo código, mismo YAML, pero una copia de infraestructura DISTINTA
+  # (otro Stack de CloudFormation) por cada stage. Por defecto usamos "dev".
+  stage: ${opt:stage, 'dev'}
+  # "profile" = qué juego de credenciales de ~/.aws/credentials usar (por
+  # nombre), en vez del perfil [default] (que en esta laptop es la cuenta
+  # del trabajo). Este proyecto SIEMPRE despliega con el perfil "personal"
+  # — así nunca corre nada por accidente contra la cuenta de la empresa.
+  # Se puede pisar puntualmente con: serverless deploy --aws-profile otro
+  profile: personal
+
+# "individually: true" = cada funcion se empaqueta en su propio .zip, con
+# SOLO las dependencias declaradas en el requirements.txt de su carpeta.
+# Sin esto, todas las funciones compartirian un unico paquete gigante con
+# la union de todas las dependencias (justo lo que queriamos evitar al
+# darle a cada Lambda su propio requirements.txt).
+package:
+  individually: true
+
+# Config de empaquetado de dependencias Python (integrado en el framework
+# desde v4 -- basta con que exista este bloque "custom.pythonRequirements"
+# para que se active, sin declarar ningun plugin).
+custom:
+  pythonRequirements:
+    # No usamos dockerizePip todavia: httpx (la unica dependencia externa
+    # de `extract`) es 100% Python puro, sin extensiones compiladas en C,
+    # asi que el wheel que baja pip en tu Mac funciona igual en Lambda
+    # (Linux). Cuando lleguemos a `curate`/`forecast` (polars, numpy,
+    # scipy, pandas -- todas con codigo compilado nativo por plataforma)
+    # SI hara falta activarlo, para compilar contra Linux dentro de Docker
+    # en vez de contra macOS.
+    dockerizePip: false
+
+# Cada archivo de infra/ declara un pedazo de CloudFormation (Resources: {...}).
+# Serverless Framework los fusiona en una sola plantilla al desplegar — por
+# eso pueden referenciarse entre sí con !Ref / !GetAtt sin necesidad de
+# exports/imports (eso solo hace falta entre STACKS distintos, y aquí
+# deliberadamente usamos uno solo — ver plan de arquitectura).
+resources:
+  - ${file(infra/s3.yml)}
+  - ${file(iam/roles.yml)}
+  # Los iremos sumando a medida que los llenemos:
+  # - ${file(infra/dynamodb.yml)}
+  # - ${file(infra/cognito.yml)}
+  # - ${file(infra/messaging.yml)}
+  # - ${file(infra/glue.yml)}
