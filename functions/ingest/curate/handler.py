@@ -17,7 +17,6 @@ import re
 import urllib.parse
 
 import boto3
-
 import geo
 
 logger = logging.getLogger()
