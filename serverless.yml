@@ -71,6 +71,7 @@ custom:
 resources:
   - ${file(infra/s3.yml)}
   - ${file(infra/messaging.yml)}
+  - ${file(infra/stepfunctions.yml)}
   - ${file(iam/roles.yml)}
   # Los iremos sumando a medida que los llenemos:
   # - ${file(infra/dynamodb.yml)}
@@ -130,3 +131,13 @@ functions:
           # vuelva a la cola (para reintento/DLQ) sin reprocesar mensajes que
           # ya se hayan escrito correctamente a curated/.
           functionResponseType: ReportBatchItemFailures
+
+  generateRanges:
+    # Primer paso del backfill (stepfunctions/backfill.asl.json): calcula los
+    # ~60 rangos mensuales de los ultimos 5 anios. Solo la invoca el state
+    # machine (Task) -- no tiene "events", nunca dispara sola.
+    module: functions/ingest/backfill
+    handler: generate_ranges.handler
+    role: GenerateRangesLambdaRole
+    timeout: 10
+    memorySize: 128

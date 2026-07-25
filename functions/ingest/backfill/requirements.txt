@@ -1,0 +1,3 @@
+# generateRanges no tiene dependencias externas (solo datetime/logging, de
+# la libreria estandar) -- archivo presente igual porque el empaquetador
+# busca requirements.txt en la carpeta del `module` de cada funcion.

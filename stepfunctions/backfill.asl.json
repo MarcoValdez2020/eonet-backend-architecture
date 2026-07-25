@@ -1,0 +1,59 @@
+{
+    "Comment": "Backfill de 5 anios de historico EONET: genera rangos mensuales y hace fan-out invocando extract para cada uno. Los placeholders ${ExtractLambdaArn}/${GenerateRangesLambdaArn} los resuelve CloudFormation (Fn::Sub) en infra/stepfunctions.yml, no Serverless Framework.",
+    "StartAt": "GenerateRanges",
+    "States": {
+        "GenerateRanges": {
+            "Type": "Task",
+            "Resource": "${GenerateRangesLambdaArn}",
+            "ResultPath": "$.windows",
+            "Next": "MapMonths"
+        },
+        "MapMonths": {
+            "Type": "Map",
+            "ItemsPath": "$.windows",
+            "MaxConcurrency": 3,
+            "ItemProcessor": {
+                "ProcessorConfig": {
+                    "Mode": "INLINE"
+                },
+                "StartAt": "ExtractMonth",
+                "States": {
+                    "ExtractMonth": {
+                        "Type": "Task",
+                        "Resource": "${ExtractLambdaArn}",
+                        "Retry": [
+                            {
+                                "ErrorEquals": [
+                                    "States.ALL"
+                                ],
+                                "IntervalSeconds": 60,
+                                "MaxAttempts": 2,
+                                "BackoffRate": 2
+                            }
+                        ],
+                        "Catch": [
+                            {
+                                "ErrorEquals": [
+                                    "States.ALL"
+                                ],
+                                "ResultPath": "$.error",
+                                "Next": "MonthFailed"
+                            }
+                        ],
+                        "End": true
+                    },
+                    "MonthFailed": {
+                        "Type": "Pass",
+                        "Parameters": {
+                            "status": "failed",
+                            "window.$": "$$.Map.Item.Value",
+                            "error.$": "$.error"
+                        },
+                        "End": true
+                    }
+                }
+            },
+            "End": true
+        }
+    }
+}

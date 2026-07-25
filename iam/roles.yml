@@ -73,3 +73,44 @@ Resources:
                   - sqs:DeleteMessage
                   - sqs:GetQueueAttributes
                 Resource: !GetAtt CurateQueue.Arn
+
+  # generateRanges (backfill) solo calcula fechas -- no lee ni escribe nada
+  # en S3/SQS/etc, asi que su Role no necesita ninguna Policy propia mas
+  # alla de poder escribir logs.
+  GenerateRangesLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+  # Role que asume el STATE MACHINE (no una Lambda) -- por eso el Principal
+  # de la trust policy es "states.amazonaws.com", no "lambda.amazonaws.com".
+  # Minimo privilegio: solo puede invocar las dos Lambdas que orquesta el
+  # backfill (extract y generateRanges), nada mas.
+  BackfillStateMachineRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: states.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: BackfillInvokeLambdasPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: lambda:InvokeFunction
+                Resource:
+                  - !GetAtt ExtractLambdaFunction.Arn
+                  - !GetAtt GenerateRangesLambdaFunction.Arn

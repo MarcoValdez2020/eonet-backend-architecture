@@ -155,7 +155,10 @@ async def fetch_range(start: dt.date, end: dt.date, status="all", limit=10000, c
 def _default_window():
     """Ventana incremental por defecto: ultimos dias (con 1 dia extra de
     solapamiento por si EONET actualiza eventos recientes con retraso)."""
-    end = dt.date.today() + dt.timedelta(days=1)  # `end` es exclusivo para EONET
+    # UTC explicito (no dt.date.today(), que toma la hora local del sistema)
+    # -- Lambda ya corre en UTC, pero esto lo hace explicito y consistente
+    # con `fetched_at` mas abajo, que ya usaba dt.timezone.utc.
+    end = dt.datetime.now(dt.timezone.utc).date() + dt.timedelta(days=1)  # `end` es exclusivo para EONET
     start = end - dt.timedelta(days=3)
     return start, end
 

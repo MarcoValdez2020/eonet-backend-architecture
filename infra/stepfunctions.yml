@@ -1,0 +1,40 @@
+# Step Functions = orquestador serverless de "maquinas de estado": defines
+# los pasos (states) en JSON (ASL, Amazon States Language) y AWS se encarga
+# de ejecutarlos, reintentar, y guardar el historial de cada ejecucion
+# (visible en la consola) sin que tengas que correr nada tu mismo.
+#
+# Este state machine hace el backfill de 5 anios: un Task que genera ~60
+# rangos mensuales (generateRanges), y un Map que hace fan-out invocando
+# extract una vez por rango (ver stepfunctions/backfill.asl.json).
+#
+# Se define aqui a mano (CloudFormation nativo), NO con el plugin
+# serverless-step-functions -- mismo criterio que el resto del proyecto:
+# cero plugins agregados salvo lo que trae Serverless Framework v4 de
+# fabrica. Ver docs/decisiones.md.
+Resources:
+  BackfillStateMachine:
+    Type: AWS::StepFunctions::StateMachine
+    Properties:
+      StateMachineName: ammper-eonet-backfill-${sls:stage}
+      # STANDARD (vs EXPRESS): ejecuciones de duracion variable (esto puede
+      # tardar minutos con 60 invocaciones a 3 en paralelo), con historial de
+      # ejecucion completo en la consola -- justo lo que quieres para
+      # depurar un backfill de una API publica que puede fallar a medias.
+      # EXPRESS esta pensado para alto volumen de ejecuciones cortas (no
+      # aplica aqui: esto se corre a mano, pocas veces).
+      StateMachineType: STANDARD
+      RoleArn: !GetAtt BackfillStateMachineRole.Arn
+      # El JSON de stepfunctions/backfill.asl.json trae placeholders
+      # ${ExtractLambdaArn}/${GenerateRangesLambdaArn} -- Fn::Sub (funcion de
+      # CloudFormation, NO variable de Serverless) los reemplaza por los ARN
+      # reales al desplegar. El archivo se carga como texto plano via el
+      # shim stepfunctions/load_definition.js (ver ese archivo).
+      DefinitionString:
+        Fn::Sub:
+          - ${file(./stepfunctions/load_definition.js)}
+          - ExtractLambdaArn: !GetAtt ExtractLambdaFunction.Arn
+            GenerateRangesLambdaArn: !GetAtt GenerateRangesLambdaFunction.Arn
+
+Outputs:
+  BackfillStateMachineArn:
+    Value: !Ref BackfillStateMachine
