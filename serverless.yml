@@ -72,11 +72,11 @@ resources:
   - ${file(infra/s3.yml)}
   - ${file(infra/messaging.yml)}
   - ${file(infra/stepfunctions.yml)}
+  - ${file(infra/glue.yml)}
   - ${file(iam/roles.yml)}
   # Los iremos sumando a medida que los llenemos:
   # - ${file(infra/dynamodb.yml)}
   # - ${file(infra/cognito.yml)}
-  # - ${file(infra/glue.yml)}
 
 functions:
   extract:

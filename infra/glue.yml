@@ -1,0 +1,138 @@
+# Glue Data Catalog = solo METADATA (que tabla existe, que columnas tiene,
+# en que carpeta de S3 vive, como esta particionada). No guarda datos ni
+# corre computo -- es el "indice" que Athena consulta antes de ir a leer
+# los Parquet reales de curated/. Ver docs/decisiones.md ("Athena + Glue
+# Data Catalog para consultas analiticas, no DynamoDB") para el porque de
+# fondo de esta pieza.
+#
+# Partition projection (en vez de Crawlers): le decimos a Glue la FORMULA
+# de las particiones (category=X/year=Y/month=Z) en vez de pedirle que las
+# descubra escaneando el bucket -- funciona porque `curate` ya escribe esas
+# carpetas de forma predecible.
+Resources:
+  EonetGlueDatabase:
+    Type: AWS::Glue::Database
+    Properties:
+      CatalogId: !Ref AWS::AccountId
+      DatabaseInput:
+        Name: ammper_eonet_${sls:stage}
+        Description: Catalogo de eventos EONET curados (ver curated/eonet/ en el bucket de datos).
+
+  CuratedEventsGlueTable:
+    Type: AWS::Glue::Table
+    Properties:
+      CatalogId: !Ref AWS::AccountId
+      DatabaseName: !Ref EonetGlueDatabase
+      TableInput:
+        Name: curated_events
+        TableType: EXTERNAL_TABLE
+        Parameters:
+          classification: parquet
+          "projection.enabled": "true"
+          # Las 13 categorias OFICIALES de EONET (confirmadas contra
+          # https://eonet.gsfc.nasa.gov/api/v3/categories), no solo las 5
+          # que ya aparecen en los datos de los ultimos 5 anios -- listar
+          # categorias de mas no cuesta nada (es solo una formula, no
+          # particiones fisicas), asi que ya cubrimos las 13 aunque hoy
+          # solo tengamos datos de 5 (ej. el primer evento de "drought"
+          # que aparezca ya seria consultable, sin tocar esto).
+          # LIMITE REAL que si aceptamos: si EONET agrega una categoria
+          # NUEVA (una 14) en el futuro, `curate` la escribiria bien en S3,
+          # pero Athena no la veria hasta agregarla aqui a mano + redeploy
+          # -- sin perdida de dato, solo invisible para Athena mientras
+          # tanto. Se acepto por ser poco frecuente (EONET no agrega
+          # categorias seguido) y porque la alternativa (projection type
+          # "injected", sin lista fija) exigiria que TODA consulta filtre
+          # por categoria explicita, matando el caso GROUP BY category sin
+          # filtro que ya usamos.
+          "projection.category.type": "enum"
+          "projection.category.values": "drought,dustHaze,earthquakes,floods,landslides,manmade,seaLakeIce,severeStorms,snow,tempExtremes,volcanoes,waterColor,wildfires"
+          # Rango generoso a proposito: se verifico contra los datos reales
+          # que `seaLakeIce` ya tiene filas desde year=2011 (un evento de
+          # hielo puede llevar geometrias trackeadas por AÑOS, mucho mas
+          # atras de los 5 años que cubre el backfill de `extract`) -- un
+          # rango angosto (ej. 2021-2027) habria dejado esas filas viejas
+          # invisibles para Athena, sin ningun error. 2010-2035 cubre eso
+          # con margen, y de nuevo: de mas no cuesta nada con projection.
+          "projection.year.type": "integer"
+          "projection.year.range": "2010,2035"
+          "projection.month.type": "integer"
+          "projection.month.range": "1,12"
+          "projection.month.digits": "2"
+          # Fn::Sub (de CloudFormation, para inyectar el nombre real del
+          # bucket) Y el propio templating de Glue (${category}/${year}/
+          # ${month}, que Glue resuelve el solo en QUERY TIME, no al
+          # desplegar) chocarian en la MISMA sintaxis ${...} -- por eso se
+          # escapan con "${!category}" etc: le dice a CloudFormation "esto
+          # NO es tuyo, dejalo literal" para que le llegue intacto a Glue.
+          # Mismo tipo de colision que Fn::Sub vs variables de Serverless
+          # en stepfunctions/ pero esta vez entre
+          # CloudFormation y Glue.
+          "storage.location.template": !Sub "s3://${DataBucket}/curated/eonet/category=${!category}/year=${!year}/month=${!month}/"
+        StorageDescriptor:
+          Location: !Sub "s3://${DataBucket}/curated/eonet/"
+          InputFormat: org.apache.hadoop.hive.ql.io.parquet.MapredParquetInputFormat
+          OutputFormat: org.apache.hadoop.hive.ql.io.parquet.MapredParquetOutputFormat
+          SerdeInfo:
+            SerializationLibrary: org.apache.hadoop.hive.ql.io.parquet.serde.ParquetHiveSerDe
+          # Mismo orden y tipos que el schema REAL de los Parquet que
+          # escribe `curate` (functions/ingest/curate/geo.py) -- verificado
+          # leyendo un archivo real de curated/ con polars, no adivinado.
+          Columns:
+            - { Name: event_id, Type: string }
+            - { Name: event_title, Type: string }
+            - { Name: event_description, Type: string }
+            - { Name: event_link, Type: string }
+            - { Name: closed, Type: timestamp }
+            - { Name: is_closed, Type: boolean }
+            - { Name: category_id, Type: string }
+            - { Name: category_title, Type: string }
+            - { Name: categories_all, Type: string }
+            - { Name: source_ids, Type: string }
+            - { Name: source_urls, Type: string }
+            - { Name: geometry_date, Type: timestamp }
+            - { Name: geometry_type, Type: string }
+            - { Name: longitude, Type: double }
+            - { Name: latitude, Type: double }
+            - { Name: coordinates_json, Type: string }
+            - { Name: magnitude_value, Type: double }
+            - { Name: magnitude_unit, Type: string }
+            - { Name: window_start, Type: string }
+            - { Name: window_end, Type: string }
+            - { Name: ingested_at, Type: string }
+            - { Name: coord_valid, Type: boolean }
+            - { Name: country_iso, Type: string }
+            - { Name: country_name, Type: string }
+            - { Name: region, Type: string }
+            - { Name: admin1, Type: string }
+            - { Name: nearest_city, Type: string }
+            - { Name: offshore, Type: boolean }
+        # Los TIPOS aqui son "string" para category (no proyectada como
+        # numero) e "int" para year/month -- coincide con projection.*.type
+        # de arriba, y deja que en SQL se pueda hacer `WHERE year = 2023`
+        # sin comillas (si fuera string, tocaria `WHERE year = '2023'`).
+        PartitionKeys:
+          - { Name: category, Type: string }
+          - { Name: year, Type: int }
+          - { Name: month, Type: int }
+
+  EonetAthenaWorkGroup:
+    Type: AWS::Athena::WorkGroup
+    Properties:
+      Name: ammper-eonet-${sls:stage}
+      Description: WorkGroup dedicado para las consultas de este proyecto -- tope de bytes escaneados por query para controlar costo.
+      WorkGroupConfiguration:
+        # Si una consulta escanearia mas de esto, Athena la cancela con un
+        # error en vez de dejarla correr -- protege contra un WHERE sin
+        # filtro de particion que barra todo curated/ sin querer.
+        BytesScannedCutoffPerQuery: 1073741824 # 1 GiB
+        EnforceWorkGroupConfiguration: true
+        PublishCloudWatchMetricsEnabled: true
+        ResultConfiguration:
+          OutputLocation: !Sub "s3://${DataBucket}/athena-results/"
+
+Outputs:
+  EonetGlueDatabaseName:
+    Value: !Ref EonetGlueDatabase
+  EonetAthenaWorkGroupName:
+    Value: !Ref EonetAthenaWorkGroup
