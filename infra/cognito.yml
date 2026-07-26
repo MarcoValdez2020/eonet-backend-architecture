@@ -1,0 +1,61 @@
+# Cognito User Pool = el directorio de usuarios (login con email+password,
+# verificacion de correo, emite JWTs) -- la identidad de quien usa la app.
+# Alcance MINIMO a proposito: solo autenticacion.
+# El sistema de permisos granulares (DynamoDB UserPermissions, trigger
+# Post-Confirmation que lo siembra) se difiere a cuando exista un
+# consumidor real (`alarms`/`admin`) -- mismo criterio YAGNI que SeenEvents
+# en `curate`.
+#
+# NO se define aqui el JWT authorizer de la HTTP API (provider.httpApi.
+# authorizers en serverless.yml) -- eso se agrega junto con la PRIMERA ruta
+# protegida (`/events`), porque la HTTP API en si misma no existe todavia
+# (Serverless Framework solo la crea cuando alguna funcion tiene un evento
+# `httpApi`). Este archivo es autocontenido y verificable solo: crear un
+# usuario y loguearlo, sin necesitar ninguna API todavia.
+Resources:
+  EonetUserPool:
+    Type: AWS::Cognito::UserPool
+    Properties:
+      UserPoolName: ammper-eonet-users-${sls:stage}
+      # Login con email (no un username separado) -- coincide con "login
+      # vía Cognito directo desde Angular" del plan original.
+      UsernameAttributes:
+        - email
+      AutoVerifiedAttributes:
+        - email
+      Schema:
+        - Name: email
+          Required: true
+          Mutable: true
+      Policies:
+        PasswordPolicy:
+          MinimumLength: 8
+          RequireLowercase: true
+          RequireUppercase: true
+          RequireNumbers: true
+          RequireSymbols: false
+
+  EonetUserPoolClient:
+    Type: AWS::Cognito::UserPoolClient
+    Properties:
+      ClientName: ammper-eonet-frontend-${sls:stage}
+      UserPoolId: !Ref EonetUserPool
+      # Sin secreto: un SPA (Angular en el navegador) no puede guardar un
+      # secreto de forma segura -- cualquiera que abra devtools lo veria.
+      GenerateSecret: false
+      # SRP (Secure Remote Password): el password nunca viaja por la red,
+      # ni cifrado -- el cliente y Cognito prueban matematicamente que
+      # ambos conocen el password sin transmitirlo. Es lo que usan
+      # Amplify/amazon-cognito-identity-js por default. Sin flujo OAuth/
+      # Hosted UI: el login lo hace un formulario propio (PrimeNG) en
+      # Angular, no una redireccion a una pantalla de AWS.
+      ExplicitAuthFlows:
+        - ALLOW_USER_SRP_AUTH
+        - ALLOW_REFRESH_TOKEN_AUTH
+      PreventUserExistenceErrors: ENABLED
+
+Outputs:
+  EonetUserPoolId:
+    Value: !Ref EonetUserPool
+  EonetUserPoolClientId:
+    Value: !Ref EonetUserPoolClient
