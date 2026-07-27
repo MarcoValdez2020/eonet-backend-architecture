@@ -195,3 +195,25 @@ functions:
           path: /events
           authorizer:
             name: cognitoJwtAuthorizer
+
+  heatmap:
+    # GET /heatmap -- densidad geografica de eventos, agregada por celda de
+    # grid + categoria (functions/events/heatmap.py). Mismo modulo que
+    # "events" (functions/events/common.py con la validacion de
+    # filtros y el ciclo de consulta a Athena) y mismo Role: consulta la
+    # misma tabla, no necesita ningun permiso adicional.
+    module: functions/events
+    handler: heatmap.handler
+    role: EventsApiLambdaRole
+    timeout: 25
+    memorySize: 256
+    environment:
+      ATHENA_DATABASE: !Ref EonetGlueDatabase
+      ATHENA_WORKGROUP: !Ref EonetAthenaWorkGroup
+      ATHENA_TABLE: curated_events
+    events:
+      - httpApi:
+          method: GET
+          path: /heatmap
+          authorizer:
+            name: cognitoJwtAuthorizer
