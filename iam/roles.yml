@@ -114,3 +114,56 @@ Resources:
                 Resource:
                   - !GetAtt ExtractLambdaFunction.Arn
                   - !GetAtt GenerateRangesLambdaFunction.Arn
+
+  # GET /events -- consulta Athena. Nota importante de como funciona esto:
+  # Athena corre la consulta CON LA IDENTIDAD de quien la lanza (esta
+  # Lambda), no con un role propio de servicio -- por eso este Role
+  # necesita permisos de Glue (leer el catalogo) y de S3 sobre curated/
+  # (los Parquet reales) y athena-results/ (donde Athena escribe cada
+  # resultado), ademas de los de athena:* sobre el WorkGroup.
+  EventsApiLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: EventsQueryAthenaPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - athena:StartQueryExecution
+                  - athena:GetQueryExecution
+                  - athena:GetQueryResults
+                  - athena:StopQueryExecution
+                Resource: !Sub arn:aws:athena:${AWS::Region}:${AWS::AccountId}:workgroup/${EonetAthenaWorkGroup}
+              - Effect: Allow
+                Action:
+                  - glue:GetDatabase
+                  - glue:GetTable
+                  - glue:GetPartitions
+                Resource:
+                  - !Sub arn:aws:glue:${AWS::Region}:${AWS::AccountId}:catalog
+                  - !Sub arn:aws:glue:${AWS::Region}:${AWS::AccountId}:database/${EonetGlueDatabase}
+                  - !Sub arn:aws:glue:${AWS::Region}:${AWS::AccountId}:table/${EonetGlueDatabase}/curated_events
+              - Effect: Allow
+                Action: s3:GetObject
+                Resource: !Sub ${DataBucket.Arn}/curated/*
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                Resource: !Sub ${DataBucket.Arn}/athena-results/*
+              - Effect: Allow
+                Action:
+                  - s3:ListBucket
+                  - s3:GetBucketLocation
+                Resource: !GetAtt DataBucket.Arn

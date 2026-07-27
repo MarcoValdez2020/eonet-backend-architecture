@@ -1,0 +1,2 @@
+# boto3 ya viene preinstalado en el runtime de Lambda (no se lista, igual
+# que en extract/curate). Sin dependencias externas mas alla de eso.

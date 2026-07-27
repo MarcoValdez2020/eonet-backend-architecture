@@ -40,6 +40,38 @@ provider:
   # Es un falso positivo del validador de config de la CLI con esta forma
   # de referenciar provider.ecr.images por nombre. Ignorar.
 
+  # HTTP API (API Gateway v2) -- Serverless Framework SOLO crea este
+  # recurso cuando alguna funcion tiene un evento "httpApi" (ver funcion
+  # "events" mas abajo, la primera de todo el proyecto). Este bloque
+  # provider.httpApi es donde vive la config COMPARTIDA por todas las
+  # rutas: CORS y el authorizer.
+  httpApi:
+    cors:
+      # Angular en dev corre en localhost:4200 (puerto default del CLI de
+      # Angular). Cuando el front se despliegue de verdad (S3+CloudFront),
+      # agregar ese dominio aqui tambien.
+      allowedOrigins:
+        - http://localhost:4200
+      allowedHeaders:
+        - Content-Type
+        - Authorization
+      allowedMethods:
+        - GET
+      # Con CORS nativo de HTTP API, API Gateway agrega los headers solo
+      # -- el handler de la Lambda NO necesita poner headers de CORS el
+      # mismo en su respuesta.
+    authorizers:
+      # JWT authorizer contra el User Pool ya desplegado (infra/cognito.yml).
+      # issuerUrl/audience usan Fn::Sub/!Ref -- CloudFormation los resuelve
+      # al ID real del User Pool/Client al desplegar, Serverless no toca
+      # estos valores (mismo patron ya usado en infra/stepfunctions.yml e
+      # infra/glue.yml).
+      cognitoJwtAuthorizer:
+        identitySource: $request.header.Authorization
+        issuerUrl: !Sub https://cognito-idp.${AWS::Region}.amazonaws.com/${EonetUserPool}
+        audience:
+          - !Ref EonetUserPoolClient
+
 # "individually: true" = cada funcion se empaqueta en su propio .zip, con
 # SOLO las dependencias declaradas en el requirements.txt de su carpeta.
 # Sin esto, todas las funciones compartirian un unico paquete gigante con
@@ -141,3 +173,25 @@ functions:
     role: GenerateRangesLambdaRole
     timeout: 10
     memorySize: 128
+
+  events:
+    # GET /events -- primer endpoint HTTP del proyecto. Consulta Athena
+    # (curated_events, ver infra/glue.yml) con filtros opcionales.
+    module: functions/events
+    handler: api.handler
+    role: EventsApiLambdaRole
+    # 25s: margen bajo el limite FIJO de 29s de API Gateway (no
+    # configurable) -- MAX_ATHENA_WAIT_SECONDS en api.py corta la espera
+    # de Athena a los 20s, dejando margen de sobra.
+    timeout: 25
+    memorySize: 256
+    environment:
+      ATHENA_DATABASE: !Ref EonetGlueDatabase
+      ATHENA_WORKGROUP: !Ref EonetAthenaWorkGroup
+      ATHENA_TABLE: curated_events
+    events:
+      - httpApi:
+          method: GET
+          path: /events
+          authorizer:
+            name: cognitoJwtAuthorizer
